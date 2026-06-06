@@ -2,13 +2,13 @@ var FoldEngine = (function () {
     var GRID = 80;
 
     var FOLD_INFO = {
-        'half-v': { name: '对折(纵)', layers: 2, symmetry: 2 },
-        'half-h': { name: '对折(横)', layers: 2, symmetry: 2 },
-        'triangle': { name: '三角折', layers: 2, symmetry: 2 },
-        'quarter': { name: '四折', layers: 4, symmetry: 4 },
-        'hexagonal': { name: '六角折', layers: 6, symmetry: 6 },
-        'window': { name: '窗花折', layers: 8, symmetry: 8 },
-        'round': { name: '团花折', layers: 12, symmetry: 12 }
+        'half-v': { name: '对折', category: '对折', layers: 2, symmetry: 2 },
+        'half-h': { name: '对折', category: '对折', layers: 2, symmetry: 2 },
+        'triangle': { name: '三角折', category: '三角折', layers: 2, symmetry: 2 },
+        'quarter': { name: '四折', category: '四折', layers: 4, symmetry: 4 },
+        'hexagonal': { name: '六角折', category: '六角折', layers: 6, symmetry: 6 },
+        'window': { name: '窗花折', category: '窗花折', layers: 8, symmetry: 8 },
+        'round': { name: '团花折', category: '团花折', layers: 12, symmetry: 12 }
     };
 
     function createGrid(size, val) {
@@ -45,19 +45,19 @@ var FoldEngine = (function () {
                 var angle = Math.atan2(y - cy, x - cx);
                 if (angle < 0) angle += 2 * Math.PI;
                 var dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
-                return dist <= cx && angle < Math.PI / 3;
+                return dist <= cx && angle <= Math.PI / 3;
             }
             case 'window': {
                 var angle = Math.atan2(y - cy, x - cx);
                 if (angle < 0) angle += 2 * Math.PI;
                 var dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
-                return dist <= cx && angle < Math.PI / 4;
+                return dist <= cx && angle <= Math.PI / 4;
             }
             case 'round': {
                 var angle = Math.atan2(y - cy, x - cx);
                 if (angle < 0) angle += 2 * Math.PI;
                 var dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
-                return dist <= cx && angle < Math.PI / 6;
+                return dist <= cx && angle <= Math.PI / 6;
             }
             default:
                 return true;
@@ -397,6 +397,109 @@ var FoldEngine = (function () {
         ctx.stroke();
     }
 
+    function renderFoldedViewScaled(cutMask, foldType, N, canvas, opts) {
+        opts = opts || {};
+        var bounds = getFoldedDisplayBounds(foldType, N);
+        var outW = Math.ceil(bounds.w);
+        var outH = Math.ceil(bounds.h);
+        canvas.width = outW;
+        canvas.height = outH;
+        var ctx = canvas.getContext('2d');
+        var imgData = ctx.createImageData(outW, outH);
+
+        var paperR = opts.paperR || 190, paperG = opts.paperG || 30, paperB = opts.paperB || 30;
+
+        for (var y = 0; y < outH; y++) {
+            for (var x = 0; x < outW; x++) {
+                var idx = (y * outW + x) * 4;
+                var srcX = x + bounds.x;
+                var srcY = y + bounds.y;
+                if (srcX >= 0 && srcX < N && srcY >= 0 && srcY < N) {
+                    if (isInFoldedRegion(srcX, srcY, foldType, N)) {
+                        if (cutMask[srcY][srcX] === 1) {
+                            imgData.data[idx] = paperR;
+                            imgData.data[idx + 1] = paperG;
+                            imgData.data[idx + 2] = paperB;
+                            imgData.data[idx + 3] = 255;
+                        } else {
+                            imgData.data[idx] = 50;
+                            imgData.data[idx + 1] = 15;
+                            imgData.data[idx + 2] = 15;
+                            imgData.data[idx + 3] = 255;
+                        }
+                    } else {
+                        imgData.data[idx] = 0;
+                        imgData.data[idx + 1] = 0;
+                        imgData.data[idx + 2] = 0;
+                        imgData.data[idx + 3] = 0;
+                    }
+                } else {
+                    imgData.data[idx] = 0;
+                    imgData.data[idx + 1] = 0;
+                    imgData.data[idx + 2] = 0;
+                    imgData.data[idx + 3] = 0;
+                }
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.8)';
+        ctx.lineWidth = 1;
+        _drawScaledFoldedBorder(ctx, foldType, outW, outH, bounds);
+    }
+
+    function _drawScaledFoldedBorder(ctx, foldType, outW, outH, bounds) {
+        var N = bounds.w * 2;
+        var cx = outW / 2, cy = outH / 2;
+        ctx.beginPath();
+        switch (foldType) {
+            case 'half-v':
+                ctx.rect(0, 0, outW, outH);
+                break;
+            case 'half-h':
+                ctx.rect(0, 0, outW, outH);
+                break;
+            case 'triangle':
+                ctx.moveTo(0, 0);
+                ctx.lineTo(outW, outH);
+                ctx.lineTo(0, outH);
+                ctx.closePath();
+                break;
+            case 'quarter':
+                ctx.rect(0, 0, outW, outH);
+                break;
+            case 'hexagonal': {
+                var oldCx = bounds.x + bounds.w / 2;
+                var oldCy = bounds.y + bounds.h / 2;
+                var maxDist = Math.min(bounds.w, bounds.h) / 2;
+                var scale = Math.min(outW / bounds.w, outH / bounds.h);
+                var displayR = maxDist * scale;
+                var newCx = outW / 2, newCy = outH / 2;
+                ctx.moveTo(newCx, newCy);
+                ctx.arc(newCx, newCy, displayR, 0, Math.PI / 3);
+                ctx.closePath();
+                break;
+            }
+            case 'window': {
+                var newCx = outW / 2, newCy = outH / 2;
+                var displayR = Math.min(outW, outH) / 2;
+                ctx.moveTo(newCx, newCy);
+                ctx.arc(newCx, newCy, displayR, 0, Math.PI / 4);
+                ctx.closePath();
+                break;
+            }
+            case 'round': {
+                var newCx = outW / 2, newCy = outH / 2;
+                var displayR = Math.min(outW, outH) / 2;
+                ctx.moveTo(newCx, newCy);
+                ctx.arc(newCx, newCy, displayR, 0, Math.PI / 6);
+                ctx.closePath();
+                break;
+            }
+        }
+        ctx.stroke();
+    }
+
     function getFoldedDisplayBounds(foldType, N) {
         switch (foldType) {
             case 'half-v': return { x: 0, y: 0, w: N / 2, h: N };
@@ -441,6 +544,7 @@ var FoldEngine = (function () {
         computeUtilization: computeUtilization,
         renderPatternToCanvas: renderPatternToCanvas,
         renderFoldedView: renderFoldedView,
+        renderFoldedViewScaled: renderFoldedViewScaled,
         getFoldedDisplayBounds: getFoldedDisplayBounds,
         gridToCanvasCoord: gridToCanvasCoord,
         canvasToGridCoord: canvasToGridCoord

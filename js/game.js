@@ -279,11 +279,19 @@ var GameScene = new Phaser.Class({
 
         this.foldButtons = [];
         var foldTypes = level.availableFolds;
+        var hasHalfV = foldTypes.indexOf('half-v') >= 0;
+        var hasHalfH = foldTypes.indexOf('half-h') >= 0;
+        var needDistinguishHalf = hasHalfV && hasHalfH;
         for (var i = 0; i < foldTypes.length; i++) {
             var ft = foldTypes[i];
             var info = FoldEngine.FOLD_INFO[ft];
             var bx = panelX, by = 115 + i * 45;
-            this._makeFoldBtn(this, bx, by, 160, 36, info.name, ft);
+            var displayText = info.name;
+            if (needDistinguishHalf) {
+                if (ft === 'half-v') displayText = '对折(纵)';
+                else if (ft === 'half-h') displayText = '对折(横)';
+            }
+            this._makeFoldBtn(this, bx, by, 160, 36, info.name, ft, displayText);
         }
 
         this.add.text(panelX, 280, '剪裁工具', {
@@ -341,11 +349,17 @@ var GameScene = new Phaser.Class({
 
     _renderFoldedPaper: function () {
         var N = FoldEngine.GRID_SIZE;
-        FoldEngine.renderFoldedView(GameState.cutMask, GameState.foldType, N, this.paperCanvas);
+        FoldEngine.renderFoldedViewScaled(GameState.cutMask, GameState.foldType, N, this.paperCanvas);
+        var texW = this.paperCanvas.width;
+        var texH = this.paperCanvas.height;
+        if (this.textures.exists('paperTex')) this.textures.remove('paperTex');
+        this.paperTex = this.textures.createCanvas('paperTex', texW, texH);
         var ctx = this.paperTex.getContext();
-        ctx.clearRect(0, 0, N, N);
+        ctx.clearRect(0, 0, texW, texH);
         ctx.drawImage(this.paperCanvas, 0, 0);
         this.paperTex.refresh();
+        this.paperImage.setTexture('paperTex');
+        this.paperImage.setDisplaySize(this.PAPER_SIZE, this.PAPER_SIZE);
     },
 
     _renderUnfoldedPaper: function () {
@@ -358,7 +372,7 @@ var GameScene = new Phaser.Class({
         this.paperTex.refresh();
     },
 
-    _makeFoldBtn: function (scene, x, y, w, h, text, foldType) {
+    _makeFoldBtn: function (scene, x, y, w, h, text, foldType, displayText) {
         var g = scene.add.graphics();
         var isSelected = GameState.foldType === foldType;
         g.fillStyle(isSelected ? 0x8B0000 : 0x6B1A1A, 0.9);
@@ -366,7 +380,8 @@ var GameScene = new Phaser.Class({
         g.lineStyle(isSelected ? 2 : 1, 0xFFD700, isSelected ? 1 : 0.5);
         g.strokeRoundedRect(x - w / 2, y - h / 2, w, h, 6);
 
-        var txt = scene.add.text(x, y, text, {
+        var btnText = displayText || text;
+        var txt = scene.add.text(x, y, btnText, {
             fontSize: '16px', fontFamily: '"Microsoft YaHei","SimHei",sans-serif',
             color: isSelected ? '#FFD700' : '#FFC0CB'
         }).setOrigin(0.5);
@@ -387,7 +402,7 @@ var GameScene = new Phaser.Class({
                 });
             }
         });
-        scene.foldButtons.push({ g: g, txt: txt, zone: zone, foldType: foldType, x: x, y: y, w: w, h: h });
+        scene.foldButtons.push({ g: g, txt: txt, zone: zone, foldType: foldType, x: x, y: y, w: w, h: h, displayText: btnText });
     },
 
     _updateFoldBtnHighlight: function () {
@@ -399,6 +414,7 @@ var GameScene = new Phaser.Class({
             btn.g.fillRoundedRect(btn.x - btn.w / 2, btn.y - btn.h / 2, btn.w, btn.h, 6);
             btn.g.lineStyle(sel ? 2 : 1, 0xFFD700, sel ? 1 : 0.5);
             btn.g.strokeRoundedRect(btn.x - btn.w / 2, btn.y - btn.h / 2, btn.w, btn.h, 6);
+            btn.txt.setText(btn.displayText);
             btn.txt.setColor(sel ? '#FFD700' : '#FFC0CB');
         }
     },
@@ -490,9 +506,44 @@ var GameScene = new Phaser.Class({
 
     _screenToGrid: function (pointer) {
         var N = FoldEngine.GRID_SIZE;
-        var gx = Math.floor((pointer.x - (this.PAPER_X - this.PAPER_SIZE / 2)) / this.SCALE);
-        var gy = Math.floor((pointer.y - (this.PAPER_Y - this.PAPER_SIZE / 2)) / this.SCALE);
-        return { x: Phaser.Math.Clamp(gx, 0, N - 1), y: Phaser.Math.Clamp(gy, 0, N - 1) };
+        var paperLeft = this.PAPER_X - this.PAPER_SIZE / 2;
+        var paperTop = this.PAPER_Y - this.PAPER_SIZE / 2;
+        var localX = pointer.x - paperLeft;
+        var localY = pointer.y - paperTop;
+
+        if (GameState.isFolded && GameState.foldType) {
+            var bounds = FoldEngine.getFoldedDisplayBounds(GameState.foldType, N);
+            var foldScaleX = this.PAPER_SIZE / bounds.w;
+            var foldScaleY = this.PAPER_SIZE / bounds.h;
+            var gx = Math.floor(localX / foldScaleX) + bounds.x;
+            var gy = Math.floor(localY / foldScaleY) + bounds.y;
+            return { x: Phaser.Math.Clamp(gx, bounds.x, bounds.x + bounds.w - 1), y: Phaser.Math.Clamp(gy, bounds.y, bounds.y + bounds.h - 1) };
+        } else {
+            var gx = Math.floor(localX / this.SCALE);
+            var gy = Math.floor(localY / this.SCALE);
+            return { x: Phaser.Math.Clamp(gx, 0, N - 1), y: Phaser.Math.Clamp(gy, 0, N - 1) };
+        }
+    },
+
+    _gridToScreen: function (gx, gy) {
+        var N = FoldEngine.GRID_SIZE;
+        var paperLeft = this.PAPER_X - this.PAPER_SIZE / 2;
+        var paperTop = this.PAPER_Y - this.PAPER_SIZE / 2;
+
+        if (GameState.isFolded && GameState.foldType) {
+            var bounds = FoldEngine.getFoldedDisplayBounds(GameState.foldType, N);
+            var foldScaleX = this.PAPER_SIZE / bounds.w;
+            var foldScaleY = this.PAPER_SIZE / bounds.h;
+            return {
+                x: paperLeft + (gx - bounds.x) * foldScaleX,
+                y: paperTop + (gy - bounds.y) * foldScaleY
+            };
+        } else {
+            return {
+                x: paperLeft + gx * this.SCALE,
+                y: paperTop + gy * this.SCALE
+            };
+        }
     },
 
     _onPointerDown: function (pointer) {
@@ -515,12 +566,10 @@ var GameScene = new Phaser.Class({
             for (var i = 0; i < GameState.freehandPoints.length; i++) {
                 var p = GameState.freehandPoints[i];
                 if (FoldEngine.isInFoldedRegion(p.x, p.y, GameState.foldType, N)) {
+                    var screenPos = this._gridToScreen(p.x, p.y);
+                    var cellSize = this._getCellSize();
                     this.drawPreview.fillStyle(0xFFD700, 0.3);
-                    this.drawPreview.fillRect(
-                        this.PAPER_X - this.PAPER_SIZE / 2 + p.x * this.SCALE,
-                        this.PAPER_Y - this.PAPER_SIZE / 2 + p.y * this.SCALE,
-                        this.SCALE, this.SCALE
-                    );
+                    this.drawPreview.fillRect(screenPos.x, screenPos.y, cellSize, cellSize);
                 }
             }
         } else {
@@ -530,38 +579,36 @@ var GameScene = new Phaser.Class({
             var maxX = Math.max(sx, ex), maxY = Math.max(sy, ey);
 
             if (GameState.drawTool === 'rect') {
+                var startScreen = this._gridToScreen(minX, minY);
+                var endScreen = this._gridToScreen(maxX + 1, maxY + 1);
+                var w = endScreen.x - startScreen.x;
+                var h = endScreen.y - startScreen.y;
                 this.drawPreview.lineStyle(2, 0xFFD700, 0.8);
-                this.drawPreview.strokeRect(
-                    this.PAPER_X - this.PAPER_SIZE / 2 + minX * this.SCALE,
-                    this.PAPER_Y - this.PAPER_SIZE / 2 + minY * this.SCALE,
-                    (maxX - minX + 1) * this.SCALE,
-                    (maxY - minY + 1) * this.SCALE
-                );
+                this.drawPreview.strokeRect(startScreen.x, startScreen.y, w, h);
                 this.drawPreview.fillStyle(0xFFD700, 0.15);
-                this.drawPreview.fillRect(
-                    this.PAPER_X - this.PAPER_SIZE / 2 + minX * this.SCALE,
-                    this.PAPER_Y - this.PAPER_SIZE / 2 + minY * this.SCALE,
-                    (maxX - minX + 1) * this.SCALE,
-                    (maxY - minY + 1) * this.SCALE
-                );
+                this.drawPreview.fillRect(startScreen.x, startScreen.y, w, h);
             } else if (GameState.drawTool === 'circle') {
                 var cx = (sx + ex) / 2, cy = (sy + ey) / 2;
                 var rx = Math.abs(ex - sx) / 2, ry = Math.abs(ey - sy) / 2;
                 var r = Math.max(rx, ry);
+                var centerScreen = this._gridToScreen(cx, cy);
+                var cellSize = this._getCellSize();
                 this.drawPreview.lineStyle(2, 0xFFD700, 0.8);
-                this.drawPreview.strokeCircle(
-                    this.PAPER_X - this.PAPER_SIZE / 2 + cx * this.SCALE,
-                    this.PAPER_Y - this.PAPER_SIZE / 2 + cy * this.SCALE,
-                    r * this.SCALE
-                );
+                this.drawPreview.strokeCircle(centerScreen.x, centerScreen.y, r * cellSize);
                 this.drawPreview.fillStyle(0xFFD700, 0.1);
-                this.drawPreview.fillCircle(
-                    this.PAPER_X - this.PAPER_SIZE / 2 + cx * this.SCALE,
-                    this.PAPER_Y - this.PAPER_SIZE / 2 + cy * this.SCALE,
-                    r * this.SCALE
-                );
+                this.drawPreview.fillCircle(centerScreen.x, centerScreen.y, r * cellSize);
             }
         }
+    },
+
+    _getCellSize: function () {
+        var N = FoldEngine.GRID_SIZE;
+        if (GameState.isFolded && GameState.foldType) {
+            var bounds = FoldEngine.getFoldedDisplayBounds(GameState.foldType, N);
+            var avgScale = (this.PAPER_SIZE / bounds.w + this.PAPER_SIZE / bounds.h) / 2;
+            return avgScale;
+        }
+        return this.SCALE;
     },
 
     _onPointerUp: function (pointer) {
