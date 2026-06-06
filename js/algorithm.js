@@ -408,6 +408,8 @@ var FoldEngine = (function () {
         var imgData = ctx.createImageData(outW, outH);
 
         var paperR = opts.paperR || 190, paperG = opts.paperG || 30, paperB = opts.paperB || 30;
+        var foldInfo = FOLD_INFO[foldType] || { layers: 1 };
+        var layers = foldInfo.layers || 1;
 
         for (var y = 0; y < outH; y++) {
             for (var x = 0; x < outW; x++) {
@@ -417,9 +419,15 @@ var FoldEngine = (function () {
                 if (srcX >= 0 && srcX < N && srcY >= 0 && srcY < N) {
                     if (isInFoldedRegion(srcX, srcY, foldType, N)) {
                         if (cutMask[srcY][srcX] === 1) {
-                            imgData.data[idx] = paperR;
-                            imgData.data[idx + 1] = paperG;
-                            imgData.data[idx + 2] = paperB;
+                            var distToEdge = _getDistanceToFoldEdge(srcX, srcY, foldType, N);
+                            var layerFactor = Math.min(layers, 4);
+                            var depthShade = Math.min(distToEdge * 1.5, 25);
+                            var layerShade = (layerFactor - 1) * 8;
+                            var totalShade = depthShade + layerShade;
+                            
+                            imgData.data[idx] = Math.max(60, paperR - totalShade);
+                            imgData.data[idx + 1] = Math.max(10, paperG - totalShade * 0.8);
+                            imgData.data[idx + 2] = Math.max(10, paperB - totalShade * 0.8);
                             imgData.data[idx + 3] = 255;
                         } else {
                             imgData.data[idx] = 50;
@@ -443,9 +451,182 @@ var FoldEngine = (function () {
         }
         ctx.putImageData(imgData, 0, 0);
 
+        _drawFoldCrease(ctx, foldType, outW, outH, bounds);
+        _drawFoldEdgeShadow(ctx, foldType, outW, outH, bounds);
+
         ctx.strokeStyle = 'rgba(255, 215, 0, 0.8)';
         ctx.lineWidth = 1;
         _drawScaledFoldedBorder(ctx, foldType, outW, outH, bounds);
+    }
+
+    function _getDistanceToFoldEdge(x, y, foldType, N) {
+        var cx = N / 2, cy = N / 2;
+        switch (foldType) {
+            case 'half-v':
+                return Math.abs(x - (N / 2 - 1));
+            case 'half-h':
+                return Math.abs(y - (N / 2 - 1));
+            case 'triangle':
+                return Math.abs(y - x) / Math.sqrt(2);
+            case 'quarter':
+                return Math.min(Math.abs(x - (N / 2 - 1)), Math.abs(y - (N / 2 - 1)));
+            case 'hexagonal':
+            case 'window':
+            case 'round': {
+                var angle = Math.atan2(y - cy, x - cx);
+                if (angle < 0) angle += 2 * Math.PI;
+                var maxAngle = foldType === 'hexagonal' ? Math.PI / 3 :
+                              foldType === 'window' ? Math.PI / 4 : Math.PI / 6;
+                var distToCenter = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+                var distToEdge = Math.min(angle, maxAngle - angle) * distToCenter;
+                return Math.min(distToEdge, N / 2 - distToCenter);
+            }
+            default:
+                return 0;
+        }
+    }
+
+    function _drawFoldCrease(ctx, foldType, outW, outH, bounds) {
+        var N = bounds.w * 2;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(80, 20, 20, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+
+        var scaleX = outW / bounds.w;
+        var scaleY = outH / bounds.h;
+
+        switch (foldType) {
+            case 'half-v': {
+                var creaseX = outW - 1;
+                ctx.beginPath();
+                ctx.moveTo(creaseX, 0);
+                ctx.lineTo(creaseX, outH);
+                ctx.stroke();
+                break;
+            }
+            case 'half-h': {
+                var creaseY = outH - 1;
+                ctx.beginPath();
+                ctx.moveTo(0, creaseY);
+                ctx.lineTo(outW, creaseY);
+                ctx.stroke();
+                break;
+            }
+            case 'triangle': {
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(outW, outH);
+                ctx.stroke();
+                break;
+            }
+            case 'quarter': {
+                var creaseX = outW - 1;
+                var creaseY = outH - 1;
+                ctx.beginPath();
+                ctx.moveTo(creaseX, 0);
+                ctx.lineTo(creaseX, outH);
+                ctx.moveTo(0, creaseY);
+                ctx.lineTo(outW, creaseY);
+                ctx.stroke();
+                break;
+            }
+            case 'hexagonal':
+            case 'window':
+            case 'round': {
+                var newCx = outW / 2, newCy = outH / 2;
+                var maxAngle = foldType === 'hexagonal' ? Math.PI / 3 :
+                              foldType === 'window' ? Math.PI / 4 : Math.PI / 6;
+                var displayR = Math.min(outW, outH) / 2 - 2;
+
+                ctx.beginPath();
+                ctx.moveTo(newCx, newCy);
+                ctx.lineTo(newCx + displayR, newCy);
+                ctx.moveTo(newCx, newCy);
+                ctx.lineTo(newCx + displayR * Math.cos(maxAngle), newCy + displayR * Math.sin(maxAngle));
+                ctx.stroke();
+                break;
+            }
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    function _drawFoldEdgeShadow(ctx, foldType, outW, outH, bounds) {
+        ctx.save();
+        var gradient;
+        var N = bounds.w * 2;
+
+        switch (foldType) {
+            case 'half-v': {
+                gradient = ctx.createLinearGradient(outW - 15, 0, outW, 0);
+                gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(outW - 15, 0, 15, outH);
+                break;
+            }
+            case 'half-h': {
+                gradient = ctx.createLinearGradient(0, outH - 15, 0, outH);
+                gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, outH - 15, outW, 15);
+                break;
+            }
+            case 'triangle': {
+                var shadowCanvas = document.createElement('canvas');
+                shadowCanvas.width = outW;
+                shadowCanvas.height = outH;
+                var sCtx = shadowCanvas.getContext('2d');
+                var shadowGrad = sCtx.createLinearGradient(0, 0, outW * 0.7, outH * 0.7);
+                shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+                sCtx.fillStyle = shadowGrad;
+                sCtx.beginPath();
+                sCtx.moveTo(0, 0);
+                sCtx.lineTo(outW, outH);
+                sCtx.lineTo(0, outH);
+                sCtx.closePath();
+                sCtx.fill();
+                ctx.drawImage(shadowCanvas, 0, 0);
+                break;
+            }
+            case 'quarter': {
+                var gradient1 = ctx.createLinearGradient(outW - 15, 0, outW, 0);
+                gradient1.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                gradient1.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+                ctx.fillStyle = gradient1;
+                ctx.fillRect(outW - 15, 0, 15, outH);
+
+                var gradient2 = ctx.createLinearGradient(0, outH - 15, 0, outH);
+                gradient2.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                gradient2.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+                ctx.fillStyle = gradient2;
+                ctx.fillRect(0, outH - 15, outW, 15);
+                break;
+            }
+            case 'hexagonal':
+            case 'window':
+            case 'round': {
+                var newCx = outW / 2, newCy = outH / 2;
+                var maxAngle = foldType === 'hexagonal' ? Math.PI / 3 :
+                              foldType === 'window' ? Math.PI / 4 : Math.PI / 6;
+                var displayR = Math.min(outW, outH) / 2 - 2;
+
+                var radShadow = ctx.createRadialGradient(newCx, newCy, displayR * 0.7, newCx, newCy, displayR);
+                radShadow.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                radShadow.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
+                ctx.fillStyle = radShadow;
+                ctx.beginPath();
+                ctx.moveTo(newCx, newCy);
+                ctx.arc(newCx, newCy, displayR, 0, maxAngle);
+                ctx.closePath();
+                ctx.fill();
+                break;
+            }
+        }
+        ctx.restore();
     }
 
     function _drawScaledFoldedBorder(ctx, foldType, outW, outH, bounds) {
@@ -547,6 +728,9 @@ var FoldEngine = (function () {
         renderFoldedViewScaled: renderFoldedViewScaled,
         getFoldedDisplayBounds: getFoldedDisplayBounds,
         gridToCanvasCoord: gridToCanvasCoord,
-        canvasToGridCoord: canvasToGridCoord
+        canvasToGridCoord: canvasToGridCoord,
+        _getDistanceToFoldEdge: _getDistanceToFoldEdge,
+        _drawFoldCrease: _drawFoldCrease,
+        _drawFoldEdgeShadow: _drawFoldEdgeShadow
     };
 })();

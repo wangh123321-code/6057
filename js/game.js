@@ -352,11 +352,38 @@ var GameScene = new Phaser.Class({
         FoldEngine.renderFoldedViewScaled(GameState.cutMask, GameState.foldType, N, this.paperCanvas);
         var texW = this.paperCanvas.width;
         var texH = this.paperCanvas.height;
+
+        var overlayCanvas = document.createElement('canvas');
+        overlayCanvas.width = texW;
+        overlayCanvas.height = texH;
+        var oCtx = overlayCanvas.getContext('2d');
+        oCtx.drawImage(this.paperCanvas, 0, 0);
+
+        oCtx.save();
+        oCtx.globalCompositeOperation = 'multiply';
+        var paperTexGrad = oCtx.createRadialGradient(texW / 2, texH / 2, 0, texW / 2, texH / 2, Math.max(texW, texH) / 2);
+        paperTexGrad.addColorStop(0, 'rgba(255, 245, 240, 0.1)');
+        paperTexGrad.addColorStop(0.7, 'rgba(255, 240, 235, 0.05)');
+        paperTexGrad.addColorStop(1, 'rgba(200, 180, 170, 0.15)');
+        oCtx.fillStyle = paperTexGrad;
+        oCtx.fillRect(0, 0, texW, texH);
+        oCtx.restore();
+
+        oCtx.save();
+        oCtx.globalCompositeOperation = 'overlay';
+        var noiseGrad = oCtx.createLinearGradient(0, 0, texW, texH);
+        noiseGrad.addColorStop(0, 'rgba(255, 255, 255, 0.03)');
+        noiseGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.02)');
+        noiseGrad.addColorStop(1, 'rgba(255, 255, 255, 0.03)');
+        oCtx.fillStyle = noiseGrad;
+        oCtx.fillRect(0, 0, texW, texH);
+        oCtx.restore();
+
         if (this.textures.exists('paperTex')) this.textures.remove('paperTex');
         this.paperTex = this.textures.createCanvas('paperTex', texW, texH);
         var ctx = this.paperTex.getContext();
         ctx.clearRect(0, 0, texW, texH);
-        ctx.drawImage(this.paperCanvas, 0, 0);
+        ctx.drawImage(overlayCanvas, 0, 0);
         this.paperTex.refresh();
         this.paperImage.setTexture('paperTex');
         this.paperImage.setDisplaySize(this.PAPER_SIZE, this.PAPER_SIZE);
@@ -471,20 +498,333 @@ var GameScene = new Phaser.Class({
     _animateFold: function (callback) {
         var scene = this;
         var px = this.PAPER_X, py = this.PAPER_Y, ps = this.PAPER_SIZE;
+        var foldType = GameState.foldType;
+        var N = FoldEngine.GRID_SIZE;
 
-        scene.paperImage.setAlpha(0.5);
-        scene.tweens.add({
-            targets: scene.paperImage,
-            scaleX: 0.8,
-            scaleY: 0.8,
-            alpha: 1,
-            duration: 400,
-            ease: 'Power2',
-            onComplete: function () {
-                scene.paperImage.setScale(1);
-                if (callback) callback();
+        scene.paperImage.setAlpha(0);
+
+        var fullCanvas = document.createElement('canvas');
+        fullCanvas.width = N;
+        fullCanvas.height = N;
+        var fullCtx = fullCanvas.getContext('2d');
+        var grid = FoldEngine.createGrid(N, 1);
+        FoldEngine.renderPatternToCanvas(grid, N, fullCanvas, { showFoldLines: false });
+
+        var staticCanvas = document.createElement('canvas');
+        var foldedCanvas = document.createElement('canvas');
+        staticCanvas.width = N;
+        staticCanvas.height = N;
+        foldedCanvas.width = N;
+        foldedCanvas.height = N;
+        var staticCtx = staticCanvas.getContext('2d');
+        var foldedCtx = foldedCanvas.getContext('2d');
+
+        staticCtx.clearRect(0, 0, N, N);
+        foldedCtx.clearRect(0, 0, N, N);
+
+        switch (foldType) {
+            case 'half-v':
+                staticCtx.drawImage(fullCanvas, 0, 0, N / 2, N, 0, 0, N / 2, N);
+                foldedCtx.drawImage(fullCanvas, N / 2, 0, N / 2, N, 0, 0, N / 2, N);
+                break;
+            case 'half-h':
+                staticCtx.drawImage(fullCanvas, 0, 0, N, N / 2, 0, 0, N, N / 2);
+                foldedCtx.drawImage(fullCanvas, 0, N / 2, N, N / 2, 0, 0, N, N / 2);
+                break;
+            case 'triangle': {
+                staticCtx.save();
+                staticCtx.beginPath();
+                staticCtx.moveTo(0, 0);
+                staticCtx.lineTo(N, N);
+                staticCtx.lineTo(0, N);
+                staticCtx.closePath();
+                staticCtx.clip();
+                staticCtx.drawImage(fullCanvas, 0, 0);
+                staticCtx.restore();
+
+                foldedCtx.save();
+                foldedCtx.beginPath();
+                foldedCtx.moveTo(0, 0);
+                foldedCtx.lineTo(N, 0);
+                foldedCtx.lineTo(N, N);
+                foldedCtx.closePath();
+                foldedCtx.clip();
+                foldedCtx.drawImage(fullCanvas, 0, 0);
+                foldedCtx.restore();
+                break;
             }
-        });
+            case 'quarter':
+                staticCtx.drawImage(fullCanvas, 0, 0, N / 2, N / 2, 0, 0, N / 2, N / 2);
+                foldedCtx.drawImage(fullCanvas, 0, 0, N, N, 0, 0, N, N);
+                break;
+            default:
+                staticCtx.drawImage(fullCanvas, 0, 0);
+                break;
+        }
+
+        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+        var staticTex = scene.textures.createCanvas('foldStaticTex', N, N);
+        var foldedTex = scene.textures.createCanvas('foldFoldedTex', N, N);
+        staticTex.getContext().drawImage(staticCanvas, 0, 0);
+        foldedTex.getContext().drawImage(foldedCanvas, 0, 0);
+        staticTex.refresh();
+        foldedTex.refresh();
+
+        var staticImage = scene.add.image(px, py, 'foldStaticTex').setDisplaySize(ps, ps);
+        var foldedImage = scene.add.image(px, py, 'foldFoldedTex').setDisplaySize(ps, ps);
+
+        staticImage.setAlpha(0);
+        foldedImage.setAlpha(0);
+
+        var foldLineX = px;
+        var foldLineY = py;
+        var foldWidth = ps;
+        var foldHeight = ps;
+
+        switch (foldType) {
+            case 'half-v':
+                staticImage.setCrop(0, 0, N / 2, N);
+                staticImage.setDisplaySize(ps / 2, ps);
+                staticImage.setX(px - ps / 4);
+                staticImage.setAlpha(1);
+
+                foldedImage.setCrop(0, 0, N / 2, N);
+                foldedImage.setDisplaySize(ps / 2, ps);
+                foldedImage.setX(px + ps / 4);
+                foldedImage.setAlpha(1);
+                foldedImage.setOrigin(0, 0.5);
+
+                scene.tweens.add({
+                    targets: foldedImage,
+                    scaleX: 0,
+                    alpha: 0.3,
+                    duration: 500,
+                    ease: 'Cubic.easeInOut',
+                    onUpdate: function (tween, target) {
+                        var progress = tween.progress;
+                        var shadowAlpha = progress * 0.3;
+                        var gradientCanvas = document.createElement('canvas');
+                        gradientCanvas.width = N / 2;
+                        gradientCanvas.height = N;
+                        var gCtx = gradientCanvas.getContext('2d');
+                        gCtx.drawImage(foldedCanvas, 0, 0);
+                        var gradient = gCtx.createLinearGradient(0, 0, N / 2, 0);
+                        gradient.addColorStop(0, 'rgba(0,0,0,0)');
+                        gradient.addColorStop(1, 'rgba(0,0,0,' + shadowAlpha + ')');
+                        gCtx.fillStyle = gradient;
+                        gCtx.fillRect(0, 0, N / 2, N);
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        var updTex = scene.textures.createCanvas('foldFoldedTex', N / 2, N);
+                        updTex.getContext().drawImage(gradientCanvas, 0, 0);
+                        updTex.refresh();
+                        target.setTexture('foldFoldedTex');
+                    },
+                    onComplete: function () {
+                        staticImage.destroy();
+                        foldedImage.destroy();
+                        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        if (callback) callback();
+                    }
+                });
+                break;
+
+            case 'half-h':
+                staticImage.setCrop(0, 0, N, N / 2);
+                staticImage.setDisplaySize(ps, ps / 2);
+                staticImage.setY(py - ps / 4);
+                staticImage.setAlpha(1);
+
+                foldedImage.setCrop(0, 0, N, N / 2);
+                foldedImage.setDisplaySize(ps, ps / 2);
+                foldedImage.setY(py + ps / 4);
+                foldedImage.setAlpha(1);
+                foldedImage.setOrigin(0.5, 0);
+
+                scene.tweens.add({
+                    targets: foldedImage,
+                    scaleY: 0,
+                    alpha: 0.3,
+                    duration: 500,
+                    ease: 'Cubic.easeInOut',
+                    onUpdate: function (tween, target) {
+                        var progress = tween.progress;
+                        var shadowAlpha = progress * 0.3;
+                        var gradientCanvas = document.createElement('canvas');
+                        gradientCanvas.width = N;
+                        gradientCanvas.height = N / 2;
+                        var gCtx = gradientCanvas.getContext('2d');
+                        gCtx.drawImage(foldedCanvas, 0, 0);
+                        var gradient = gCtx.createLinearGradient(0, 0, 0, N / 2);
+                        gradient.addColorStop(0, 'rgba(0,0,0,0)');
+                        gradient.addColorStop(1, 'rgba(0,0,0,' + shadowAlpha + ')');
+                        gCtx.fillStyle = gradient;
+                        gCtx.fillRect(0, 0, N, N / 2);
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        var updTex = scene.textures.createCanvas('foldFoldedTex', N, N / 2);
+                        updTex.getContext().drawImage(gradientCanvas, 0, 0);
+                        updTex.refresh();
+                        target.setTexture('foldFoldedTex');
+                    },
+                    onComplete: function () {
+                        staticImage.destroy();
+                        foldedImage.destroy();
+                        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        if (callback) callback();
+                    }
+                });
+                break;
+
+            case 'triangle': {
+                staticImage.setAlpha(1);
+                foldedImage.setAlpha(1);
+                foldedImage.setOrigin(0, 0);
+
+                var foldProgress = { value: 0 };
+                scene.tweens.add({
+                    targets: foldProgress,
+                    value: 1,
+                    duration: 600,
+                    ease: 'Cubic.easeInOut',
+                    onUpdate: function (tween) {
+                        var p = tween.progress;
+                        foldedImage.setScale(1 - p * 0.5, 1 - p * 0.5);
+                        foldedImage.setRotation(-p * Math.PI / 4);
+                        foldedImage.setAlpha(1 - p * 0.6);
+                        foldedImage.setX(px + p * ps * 0.2);
+                        foldedImage.setY(py + p * ps * 0.2);
+                    },
+                    onComplete: function () {
+                        staticImage.destroy();
+                        foldedImage.destroy();
+                        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        if (callback) callback();
+                    }
+                });
+                break;
+            }
+
+            case 'quarter': {
+                staticImage.setCrop(0, 0, N / 2, N / 2);
+                staticImage.setDisplaySize(ps / 2, ps / 2);
+                staticImage.setX(px - ps / 4);
+                staticImage.setY(py - ps / 4);
+                staticImage.setAlpha(1);
+
+                foldedImage.setAlpha(1);
+
+                var qProgress = { value: 0 };
+                scene.tweens.add({
+                    targets: qProgress,
+                    value: 1,
+                    duration: 700,
+                    ease: 'Cubic.easeInOut',
+                    onUpdate: function (tween) {
+                        var p = tween.progress;
+                        foldedImage.setScale(1 - p * 0.5, 1 - p * 0.5);
+                        foldedImage.setAlpha(1 - p * 0.7);
+                    },
+                    onComplete: function () {
+                        staticImage.destroy();
+                        foldedImage.destroy();
+                        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        if (callback) callback();
+                    }
+                });
+                break;
+            }
+
+            case 'hexagonal':
+            case 'window':
+            case 'round': {
+                var maxAngle = foldType === 'hexagonal' ? Math.PI / 3 :
+                              foldType === 'window' ? Math.PI / 4 : Math.PI / 6;
+                var layers = foldType === 'hexagonal' ? 6 :
+                            foldType === 'window' ? 8 : 12;
+
+                staticImage.setAlpha(1);
+                foldedImage.setAlpha(1);
+
+                var sectorProgress = { value: 0 };
+                scene.tweens.add({
+                    targets: sectorProgress,
+                    value: 1,
+                    duration: 800,
+                    ease: 'Cubic.easeInOut',
+                    onUpdate: function (tween) {
+                        var p = tween.progress;
+                        var currentAngle = maxAngle + (2 * Math.PI - maxAngle) * (1 - p);
+                        
+                        var sectorCanvas = document.createElement('canvas');
+                        sectorCanvas.width = N;
+                        sectorCanvas.height = N;
+                        var sCtx = sectorCanvas.getContext('2d');
+                        
+                        sCtx.clearRect(0, 0, N, N);
+                        sCtx.save();
+                        sCtx.beginPath();
+                        sCtx.moveTo(N / 2, N / 2);
+                        sCtx.arc(N / 2, N / 2, N / 2, 0, currentAngle);
+                        sCtx.closePath();
+                        sCtx.clip();
+                        sCtx.drawImage(fullCanvas, 0, 0);
+                        sCtx.restore();
+
+                        var shadowAlpha = p * 0.3;
+                        sCtx.save();
+                        sCtx.beginPath();
+                        sCtx.moveTo(N / 2, N / 2);
+                        sCtx.arc(N / 2, N / 2, N / 2, 0, currentAngle);
+                        sCtx.closePath();
+                        var edgeGrad = sCtx.createRadialGradient(N / 2, N / 2, N / 4, N / 2, N / 2, N / 2);
+                        edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                        edgeGrad.addColorStop(1, 'rgba(0,0,0,' + shadowAlpha + ')');
+                        sCtx.fillStyle = edgeGrad;
+                        sCtx.fill();
+                        sCtx.restore();
+
+                        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+                        var updTex = scene.textures.createCanvas('foldStaticTex', N, N);
+                        updTex.getContext().drawImage(sectorCanvas, 0, 0);
+                        updTex.refresh();
+                        staticImage.setTexture('foldStaticTex');
+                        
+                        var scale = 1 + p * 0.3;
+                        staticImage.setScale(scale);
+                        staticImage.setAlpha(1 - p * 0.1);
+                    },
+                    onComplete: function () {
+                        staticImage.destroy();
+                        foldedImage.destroy();
+                        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        if (callback) callback();
+                    }
+                });
+                break;
+            }
+
+            default:
+                scene.tweens.add({
+                    targets: staticImage,
+                    scaleX: 0.5,
+                    scaleY: 0.5,
+                    alpha: 0,
+                    duration: 400,
+                    ease: 'Power2',
+                    onComplete: function () {
+                        staticImage.destroy();
+                        if (scene.textures.exists('foldStaticTex')) scene.textures.remove('foldStaticTex');
+                        if (scene.textures.exists('foldFoldedTex')) scene.textures.remove('foldFoldedTex');
+                        if (callback) callback();
+                    }
+                });
+                break;
+        }
     },
 
     _animateUnfold: function (callback) {
