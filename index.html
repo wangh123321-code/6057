@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>剪纸解谜 — 折·剪·展·惊艳</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✂️</text></svg>">
+</head>
+<body>
+    <div class="corner-decoration top-left"></div>
+    <div class="corner-decoration top-right"></div>
+    <div class="corner-decoration bottom-left"></div>
+    <div class="corner-decoration bottom-right"></div>
+
+    <div id="game-container"></div>
+
+    <div class="loading-overlay" id="loading">
+        <div class="loading-text">剪纸解谜</div>
+        <div class="loading-paper"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <script src="js/algorithm.js"></script>
+    <script src="js/levels.js"></script>
+    <script src="js/game.js"></script>
+
+    <script>
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                var loading = document.getElementById('loading');
+                if (loading) {
+                    loading.classList.add('hidden');
+                    setTimeout(function() { loading.remove(); }, 500);
+                }
+            }, 800);
+        });
+    </script>
+</body>
+</html>
